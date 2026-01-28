@@ -1,0 +1,26 @@
+FROM python:3.13-bookworm
+
+ARG PYPI_REGISTRY="https://pypi.org/simple/"
+
+WORKDIR /app
+
+RUN pip config set global.index-url "${PYPI_REGISTRY}"
+
+COPY . /app
+
+RUN pip install --no-cache-dir playwright==1.57.0 && \
+    playwright install chromium --with-deps
+
+RUN pip install --no-cache-dir .
+
+RUN pip install --no-cache-dir \
+    ./plugins/omnimd-zhihu-reader \
+    ./plugins/omnimd-toutiao-reader \
+    ./plugins/omnimd-freedium-reader \
+    ./plugins/omnimd-browser-reader
+
+ENV OMNIMD_STORE_DIR=/tmp/.ommimd
+ENV FC_SERVER_HOST=0.0.0.0
+ENV FC_SERVER_PORT=9000
+
+CMD ["python", "-m", "omni_article_markdown.fc_http_server"]
