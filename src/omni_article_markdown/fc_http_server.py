@@ -1,9 +1,41 @@
 import json
 import os
+import threading
+import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlsplit
 
 from .omni_article_md import OmniArticleMarkdown
+
+_THROTTLE_DEFAULT_MS = int(os.getenv("OMNIMD_THROTTLE_DEFAULT_MS", "0") or 0)
+_THROTTLE_MP_WEIXIN_MS = int(os.getenv("OMNIMD_THROTTLE_MP_WEIXIN_MS", "3000") or 0)
+_LAST_REQ_AT: dict[str, float] = {}
+_LAST_REQ_LOCK = threading.Lock()
+
+
+def _throttle(url: str) -> None:
+    target = urlsplit(url)
+    host = (target.netloc or "").lower()
+    if not host:
+        return
+
+    min_ms = _THROTTLE_DEFAULT_MS
+    if host.endswith("mp.weixin.qq.com"):
+        min_ms = _THROTTLE_MP_WEIXIN_MS
+
+    if min_ms <= 0:
+        return
+
+    min_s = min_ms / 1000.0
+    with _LAST_REQ_LOCK:
+        now = time.monotonic()
+        last = _LAST_REQ_AT.get(host)
+        if last is not None:
+            wait_s = min_s - (now - last)
+            if wait_s > 0:
+                time.sleep(wait_s)
+                now = time.monotonic()
+        _LAST_REQ_AT[host] = now
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -66,6 +98,7 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json(400, {"error": "missing url"})
             return
         try:
+            _throttle(url)
             ctx = OmniArticleMarkdown(url).parse()
             self._send_markdown(200, ctx.markdown)
         except Exception as e:
